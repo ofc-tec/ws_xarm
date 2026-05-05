@@ -1,0 +1,85 @@
+# === ROS 2 / Colcon Workspace ===
+build/
+install/
+log/
+.colcon/
+
+# === ROS 2 Runtime & Data ===
+.ros/
+.ros2/
+*.bag
+rosbag2_*/
+*.db3
+*.sqlite3
+
+# === Python ===
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+.Python
+venv/
+env/
+.venv/
+ENV/
+
+# === C++ / CMake Build Artifacts ===
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+compile_commands.json
+**/CMakeLists.txt.user
+
+# === Secrets, Keys & Credentials (VERY IMPORTANT) ===
+.env
+.env*
+!*.env.example
+!*.env.template
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cer
+*.pub
+secrets.*
+api_key.*
+private_key.*
+credentials.*
+config_secret.*
+keystore/
+demo_keys/
+private/
+public/
+
+# === IDE / Editor files ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.cproject
+.pydevproject
+.clangd/
+.cache/
+
+# === OS generated files ===
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# === Logs & Temporary files ===
+*.log
+*.roslog
+*.bak
+*.tmp
+*.temp
+
+# ================================================
+# Do NOT ignore the submodule itself
+# ================================================
+!src/xarm_ros2/
+EOF
