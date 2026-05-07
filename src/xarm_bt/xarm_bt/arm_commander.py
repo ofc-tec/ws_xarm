@@ -53,12 +53,15 @@ class XArmMoveItPyCommander:
                 kwargs["pose_link"] = link
             self.group.set_goal_state(**kwargs)
 
+            if execute:
+                executed = self.group.plan_and_execute_with_single_pipeline(self.plan_params, self.robot)
+                if not executed:
+                    return ArmResult(False, "Planning or execution failed")
+                return ArmResult(True, "Planning and execution succeeded")
+
             plan_succeeded = self.group.plan_with_single_pipeline(self.plan_params)
             if not plan_succeeded:
                 return ArmResult(False, "Planning failed")
-
-            if execute:
-                return ArmResult(False, "Execution is not wired through the bool-only MoveItPy planning helper yet")
 
             return ArmResult(True, "Planning succeeded; execution disabled")
         except Exception as exc:
@@ -69,12 +72,15 @@ class XArmMoveItPyCommander:
             self.group.set_start_state_to_current_state()
             self.group.set_goal_state(configuration_name=target_name)
 
+            if execute:
+                executed = self.group.plan_and_execute_with_single_pipeline(self.plan_params, self.robot)
+                if not executed:
+                    return ArmResult(False, f"Planning or execution to named target '{target_name}' failed")
+                return ArmResult(True, f"Named target '{target_name}' executed")
+
             plan_succeeded = self.group.plan_with_single_pipeline(self.plan_params)
             if not plan_succeeded:
                 return ArmResult(False, f"Planning to named target '{target_name}' failed")
-
-            if execute:
-                return ArmResult(False, "Execution is not wired through the bool-only MoveItPy planning helper yet")
 
             return ArmResult(True, f"Named target '{target_name}' planned")
         except Exception as exc:

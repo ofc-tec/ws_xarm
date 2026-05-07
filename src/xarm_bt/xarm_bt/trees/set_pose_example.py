@@ -25,7 +25,7 @@ def create_behavior_tree():
             pose=make_example_pose(),
             group_name="xarm6",
             pose_link="link_eef",
-            execute=False,
+            execute=True,
         )
     )
     return py_trees.trees.BehaviourTree(root)
