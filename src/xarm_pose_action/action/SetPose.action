@@ -1,0 +1,22 @@
+# Goal
+geometry_msgs/PoseStamped target_pose
+string planning_group
+string end_effector_link
+bool execute
+bool cartesian
+float64 velocity_scaling
+float64 acceleration_scaling
+float64 planning_time
+int32 planning_attempts
+
+---
+# Result
+bool success
+string message
+int32 moveit_error_code
+float64 cartesian_fraction
+
+---
+# Feedback
+string state
+float64 progress

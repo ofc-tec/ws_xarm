@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>xarm_bt</name>
+  <version>0.0.0</version>
+  <description>Python behavior-tree leaves for controlling xArm with MoveItPy.</description>
+  <maintainer email="ofc1227@tec.mx">oscar</maintainer>
+  <license>BSD</license>
+
+  <depend>ament_python</depend>
+  <depend>rclpy</depend>
+  <depend>py_trees</depend>
+  <depend>geometry_msgs</depend>
+  <depend>moveit_py</depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>pc_tools</exec_depend>
+  <exec_depend>uf_ros_lib</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

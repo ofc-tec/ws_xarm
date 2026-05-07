@@ -57,15 +57,15 @@ private:
 
     pub_->publish(out);
 
-    RCLCPP_INFO_THROTTLE(
-      this->get_logger(),
-      *this->get_clock(),
-      1000,
-      "published filtered cloud: in=%zu out=%zu leaf=%.3f",
-      cloud->size(),
-      filtered->size(),
-      leaf_size
-    );
+    // RCLCPP_INFO_THROTTLE(
+    //   this->get_logger(),
+    //   *this->get_clock(),
+    //   1000,
+    //   "published filtered cloud: in=%zu out=%zu leaf=%.3f",
+    //   cloud->size(),
+    //   filtered->size(),
+    //   leaf_size
+    // );
   }
 
   int count_ = 0;
