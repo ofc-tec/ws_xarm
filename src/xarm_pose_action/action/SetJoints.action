@@ -1,0 +1,19 @@
+# Goal
+float64[] joint_values
+string planning_group
+bool execute
+float64 velocity_scaling
+float64 acceleration_scaling
+float64 planning_time
+int32 planning_attempts
+
+---
+# Result
+bool success
+string message
+int32 moveit_error_code
+
+---
+# Feedback
+string state
+float64 progress

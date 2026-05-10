@@ -15,6 +15,7 @@ find_package(rclcpp_action REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "action/SetJoints.action"
   "action/SetPose.action"
   DEPENDENCIES geometry_msgs
 )
@@ -32,7 +33,18 @@ ament_target_dependencies(set_pose_action_server
 rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
 target_link_libraries(set_pose_action_server "${cpp_typesupport_target}")
 
+add_executable(set_joints_action_server src/set_joints_action_server.cpp)
+target_compile_features(set_joints_action_server PUBLIC cxx_std_17)
+ament_target_dependencies(set_joints_action_server
+  moveit_msgs
+  moveit_ros_planning_interface
+  rclcpp
+  rclcpp_action
+)
+target_link_libraries(set_joints_action_server "${cpp_typesupport_target}")
+
 install(TARGETS
+  set_joints_action_server
   set_pose_action_server
   DESTINATION lib/${PROJECT_NAME}
 )

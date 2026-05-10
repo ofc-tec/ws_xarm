@@ -1,3 +1,5 @@
+# === Yolo models ===
+*.pt
 # === ROS 2 / Colcon Workspace ===
 build/
 install/

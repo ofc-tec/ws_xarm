@@ -13,7 +13,13 @@ setup(
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
-        ("share/" + package_name + "/launch", ["launch/set_pose_example.launch.py"]),
+        (
+            "share/" + package_name + "/launch",
+            [
+                "launch/grasping_tree.launch.py",
+                "launch/set_pose_example.launch.py",
+            ],
+        ),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
@@ -25,6 +31,7 @@ setup(
     entry_points={
         "console_scripts": [
             "set_pose_example = xarm_bt.set_pose_example_node:main",
+            "grasping_tree = xarm_bt.grasping_tree_node:main",
         ],
     },
 )
