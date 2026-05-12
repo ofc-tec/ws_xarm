@@ -1,78 +1,118 @@
 import py_trees
+from rclpy.action import ActionClient
 from py_trees.common import Access
 
+from xarm_pose_action.action import SetJoints
+
+
 class SetJointValues(py_trees.behaviour.Behaviour):
-    """MoveItPy-style BT leaf for an xArm joint-space goal."""
+    """BT leaf that sends a joint-space goal to the xArm SetJoints action server."""
 
     def __init__(
         self,
         name: str,
+        node=None,
         joint_values=None,
         joint_values_key: str = "arm_joint_values",
         group_name: str = "xarm6",
         execute: bool = False,
+        action_name: str = "/set_joints",
+        velocity_scaling: float = 0.9,
+        acceleration_scaling: float = 0.9,
+        planning_time: float = 5.0,
+        planning_attempts: int = 5,
     ):
         super().__init__(name)
+        self.node = node
         self.joint_values = joint_values
         self.joint_values_key = joint_values_key
         self.group_name = group_name
         self.execute = bool(execute)
+        self.action_name = action_name
+        self.velocity_scaling = velocity_scaling
+        self.acceleration_scaling = acceleration_scaling
+        self.planning_time = planning_time
+        self.planning_attempts = planning_attempts
 
         self.bb = py_trees.blackboard.Client(name=f"{name}_BB")
         self.bb.register_key(self.joint_values_key, Access.READ)
 
-        self.moveit = None
-        self.arm = None
-        self.plan_params = None
-        self.robot_state_cls = None
-        self._done = False
-        self._success = False
+        self.client = None
+        self.goal_future = None
+        self.result_future = None
+        self._goal_sent = False
+        self._failed_to_start = False
 
     def setup(self, **kwargs):
-        from moveit.core.robot_state import RobotState
-        from moveit.planning import MoveItPy, PlanRequestParameters
-
-        self.moveit = MoveItPy(node_name="xarm_bt_moveit_py")
-        self.arm = self.moveit.get_planning_component(self.group_name)
-        self.plan_params = PlanRequestParameters(self.moveit, "")
-        self.robot_state_cls = RobotState
+        self.node = self.node or kwargs.get("node")
+        if self.node is None:
+            raise RuntimeError("SetJointValues requires a ROS node")
+        self.client = ActionClient(self.node, SetJoints, self.action_name)
 
     def initialise(self):
-        self._done = False
-        self._success = False
+        self.goal_future = None
+        self.result_future = None
+        self._goal_sent = False
+        self._failed_to_start = False
 
-    def update(self):
-        if self._done:
-            return py_trees.common.Status.SUCCESS if self._success else py_trees.common.Status.FAILURE
+        if not self.client.wait_for_server(timeout_sec=1.0):
+            self.node.get_logger().warn(f"[SetJointValues] Action {self.action_name} not available")
+            self._failed_to_start = True
+            return
 
         joint_values = self.joint_values
         if joint_values is None:
             joint_values = getattr(self.bb, self.joint_values_key, None)
 
         if joint_values is None:
-            self.logger.info("[SetJointValues] No joint values available")
-            self._done = True
-            self._success = False
+            self.node.get_logger().warn("[SetJointValues] No joint values available")
+            self._failed_to_start = True
+            return
+
+        goal = SetJoints.Goal()
+        goal.joint_values = [float(value) for value in joint_values]
+        goal.planning_group = self.group_name
+        goal.execute = self.execute
+        goal.velocity_scaling = float(self.velocity_scaling)
+        goal.acceleration_scaling = float(self.acceleration_scaling)
+        goal.planning_time = float(self.planning_time)
+        goal.planning_attempts = int(self.planning_attempts)
+
+        self.node.get_logger().info(f"[SetJointValues] Sending joint goal to {self.action_name}")
+        self.goal_future = self.client.send_goal_async(goal, feedback_callback=self._feedback_callback)
+        self._goal_sent = True
+
+    def update(self):
+        if self._failed_to_start:
             return py_trees.common.Status.FAILURE
 
-        try:
-            robot_state = self.robot_state_cls(self.moveit.get_robot_model())
-            robot_state.set_joint_group_positions(self.group_name, list(joint_values))
-            robot_state.update()
+        if not self._goal_sent or self.goal_future is None:
+            return py_trees.common.Status.RUNNING
 
-            self.arm.set_start_state_to_current_state()
-            self.arm.set_goal_state(robot_state=robot_state)
+        if self.result_future is None:
+            if not self.goal_future.done():
+                return py_trees.common.Status.RUNNING
 
-            if self.execute:
-                self._success = self.arm.plan_and_execute_with_single_pipeline(self.plan_params, self.moveit)
-            else:
-                self._success = self.arm.plan_with_single_pipeline(self.plan_params)
+            goal_handle = self.goal_future.result()
+            if not goal_handle.accepted:
+                self.node.get_logger().warn("[SetJointValues] Joint goal rejected")
+                return py_trees.common.Status.FAILURE
 
-            message = "succeeded" if self._success else "failed"
-            self.logger.info(f"[SetJointValues] Joint goal {message}")
-        except Exception as exc:
-            self._success = False
-            self.logger.info(f"[SetJointValues] MoveItPy exception: {exc}")
+            self.node.get_logger().info("[SetJointValues] Joint goal accepted")
+            self.result_future = goal_handle.get_result_async()
+            return py_trees.common.Status.RUNNING
 
-        self._done = True
-        return py_trees.common.Status.SUCCESS if self._success else py_trees.common.Status.FAILURE
+        if not self.result_future.done():
+            return py_trees.common.Status.RUNNING
+
+        result = self.result_future.result().result
+        if result.success:
+            self.node.get_logger().info(f"[SetJointValues] {result.message}")
+            return py_trees.common.Status.SUCCESS
+
+        self.node.get_logger().warn(f"[SetJointValues] {result.message}")
+        return py_trees.common.Status.FAILURE
+
+    def _feedback_callback(self, feedback_msg):
+        feedback = feedback_msg.feedback
+        self.node.get_logger().info(f"[SetJointValues] {feedback.state}")

@@ -1,5 +1,5 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, OpaqueFunction, TimerAction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from uf_ros_lib.moveit_configs_builder import MoveItConfigsBuilder
@@ -38,7 +38,12 @@ def launch_setup(context, *args, **kwargs):
         velocity_control=velocity_control,
         model1300=model1300,
         robot_sn=robot_sn,
-    ).moveit_cpp().to_moveit_configs()
+    ).to_moveit_configs()
+    move_group_interface_params = {
+        "robot_description": moveit_config.to_dict()["robot_description"],
+        "robot_description_semantic": moveit_config.to_dict()["robot_description_semantic"],
+        "robot_description_kinematics": moveit_config.to_dict()["robot_description_kinematics"],
+    }
 
     return [
         Node(
@@ -182,14 +187,28 @@ def launch_setup(context, *args, **kwargs):
                 }
             ],
         ),
-        Node(
-            package="xarm_bt",
-            executable="grasping_tree",
-            name="xarm_bt_grasping_tree",
-            output="screen",
-            parameters=[
-                moveit_config.to_dict(),
-                {"use_sim_time": use_sim_time},
+        TimerAction(
+            period=8.0,
+            actions=[
+                Node(
+                    package="xarm_pose_action",
+                    executable="set_joints_action_server",
+                    name="set_joints_action_server",
+                    output="screen",
+                    parameters=[
+                        move_group_interface_params,
+                        {
+                            "planning_group": "xarm6",
+                            "action_name": "set_joints",
+                            "execute": True,
+                            "velocity_scaling": 0.9,
+                            "acceleration_scaling": 0.9,
+                            "planning_time": 25.0,
+                            "planning_attempts": 10,
+                            "use_sim_time": use_sim_time,
+                        },
+                    ],
+                ),
             ],
         ),
     ]

@@ -10,8 +10,11 @@
   <depend>ament_python</depend>
   <depend>rclpy</depend>
   <depend>py_trees</depend>
+  <depend>py_trees_ros</depend>
   <depend>geometry_msgs</depend>
   <depend>moveit_py</depend>
+  <depend>robotino_interfaces</depend>
+  <depend>xarm_pose_action</depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>tf2_ros</exec_depend>

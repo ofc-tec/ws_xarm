@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <functional>
 #include <map>
 #include <memory>
@@ -9,6 +10,7 @@
 #include <vector>
 
 #include <moveit/move_group_interface/move_group_interface.hpp>
+#include <moveit/robot_state/robot_state.hpp>
 #include <moveit_msgs/msg/move_it_error_codes.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
@@ -52,6 +54,18 @@ public:
     default_planning_time_ = get_or_declare_parameter<double>("planning_time", 5.0);
     default_planning_attempts_ = get_or_declare_parameter<int>("planning_attempts", 5);
     action_name_ = get_or_declare_parameter<std::string>("action_name", "set_joints");
+
+  }
+
+  void initialize()
+  {
+    RCLCPP_INFO(
+        get_logger(),
+        "Creating MoveIt interface for planning group '%s'",
+        default_planning_group_.c_str());
+    move_group_ = std::make_shared<moveit::planning_interface::MoveGroupInterface>(
+        shared_from_this(), default_planning_group_);
+    RCLCPP_INFO(get_logger(), "MoveIt interface ready for planning group '%s'", default_planning_group_.c_str());
 
     action_server_ = rclcpp_action::create_server<SetJoints>(
         this,
@@ -141,6 +155,37 @@ private:
     }
   }
 
+  bool target_reached(
+      const std::shared_ptr<moveit::planning_interface::MoveGroupInterface>& move_group,
+      const std::string& planning_group,
+      const std::vector<double>& joint_targets,
+      double tolerance)
+  {
+    auto current_state = move_group->getCurrentState(2.0);
+    if (!current_state) {
+      RCLCPP_WARN(get_logger(), "Could not read current robot state while checking final joint target");
+      return false;
+    }
+
+    std::vector<double> current_positions;
+    current_state->copyJointGroupPositions(planning_group, current_positions);
+    if (current_positions.size() != joint_targets.size()) {
+      RCLCPP_WARN(
+          get_logger(),
+          "Current joint state size %zu does not match target size %zu",
+          current_positions.size(),
+          joint_targets.size());
+      return false;
+    }
+
+    for (std::size_t i = 0; i < joint_targets.size(); ++i) {
+      if (std::fabs(current_positions[i] - joint_targets[i]) > tolerance) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   void execute_goal(const std::shared_ptr<GoalHandleSetJoints> goal_handle)
   {
     auto result = std::make_shared<SetJoints::Result>();
@@ -159,9 +204,22 @@ private:
     const int planning_attempts = positive_or_default(goal->planning_attempts, default_planning_attempts_);
 
     try {
-      publish_feedback(goal_handle, "Creating MoveIt interface", 0.05);
-      auto move_group = std::make_shared<moveit::planning_interface::MoveGroupInterface>(
-          shared_from_this(), planning_group);
+      std::lock_guard<std::mutex> commander_lock(commander_mutex_);
+      publish_feedback(goal_handle, "Using MoveIt interface", 0.05);
+      if (planning_group != default_planning_group_) {
+        result->message = "SetJoints server was initialized for a different planning group";
+        result->moveit_error_code = moveit_msgs::msg::MoveItErrorCodes::INVALID_GROUP_NAME;
+        RCLCPP_ERROR(
+            get_logger(),
+            "%s: requested '%s', available '%s'",
+            result->message.c_str(),
+            planning_group.c_str(),
+            default_planning_group_.c_str());
+        goal_handle->abort(result);
+        finish_goal();
+        return;
+      }
+      auto move_group = move_group_;
       move_group->setMaxVelocityScalingFactor(velocity_scaling);
       move_group->setMaxAccelerationScalingFactor(acceleration_scaling);
       move_group->setPlanningTime(planning_time);
@@ -198,7 +256,25 @@ private:
       }
 
       publish_feedback(goal_handle, "Planning joint target", 0.25);
-      const bool target_ok = move_group->setJointValueTarget(joint_names, joint_targets);
+      RCLCPP_INFO(get_logger(), "Reading current state for RobotState joint target");
+      auto target_state = move_group->getCurrentState(2.0);
+      if (!target_state) {
+        result->message = "Could not read current robot state";
+        result->moveit_error_code = moveit_msgs::msg::MoveItErrorCodes::START_STATE_INVALID;
+        RCLCPP_ERROR(get_logger(), "%s", result->message.c_str());
+        goal_handle->abort(result);
+        finish_goal();
+        return;
+      }
+      target_state->setJointGroupPositions(planning_group, joint_targets);
+      target_state->update();
+
+      RCLCPP_INFO(get_logger(), "Calling move_group->setJointValueTarget(RobotState)");
+      const bool target_ok = move_group->setJointValueTarget(*target_state);
+      RCLCPP_INFO(
+          get_logger(),
+          "move_group->setJointValueTarget(RobotState) returned %s",
+          target_ok ? "true" : "false");
       if (!target_ok) {
         result->message = "Joint target rejected by MoveIt";
         result->moveit_error_code = moveit_msgs::msg::MoveItErrorCodes::INVALID_GOAL_CONSTRAINTS;
@@ -207,20 +283,20 @@ private:
         return;
       }
 
-      moveit::planning_interface::MoveGroupInterface::Plan plan;
-      RCLCPP_INFO(get_logger(), "Calling move_group->plan()");
-      const auto plan_code = move_group->plan(plan);
-      RCLCPP_INFO(get_logger(), "move_group->plan() returned %d", plan_code.val);
-      result->moveit_error_code = plan_code.val;
-      log_plan(plan);
-      if (plan_code != moveit::core::MoveItErrorCode::SUCCESS) {
-        result->message = "Joint planning failed";
-        goal_handle->abort(result);
-        finish_goal();
-        return;
-      }
-
       if (!execute_motion) {
+        moveit::planning_interface::MoveGroupInterface::Plan plan;
+        RCLCPP_INFO(get_logger(), "Calling move_group->plan()");
+        const auto plan_code = move_group->plan(plan);
+        RCLCPP_INFO(get_logger(), "move_group->plan() returned %d", plan_code.val);
+        result->moveit_error_code = plan_code.val;
+        log_plan(plan);
+        if (plan_code != moveit::core::MoveItErrorCode::SUCCESS) {
+          result->message = "Joint planning failed";
+          goal_handle->abort(result);
+          finish_goal();
+          return;
+        }
+
         result->success = true;
         result->message = "Planning succeeded; execution disabled";
         publish_feedback(goal_handle, result->message, 1.0);
@@ -237,12 +313,19 @@ private:
       }
 
       publish_feedback(goal_handle, "Executing trajectory", 0.75);
-      RCLCPP_INFO(get_logger(), "Calling move_group->execute()");
-      const auto exec_code = move_group->execute(plan);
-      RCLCPP_INFO(get_logger(), "move_group->execute() returned %d", exec_code.val);
+      RCLCPP_INFO(get_logger(), "Calling move_group->move()");
+      const auto exec_code = move_group->move();
+      RCLCPP_INFO(get_logger(), "move_group->move() returned %d", exec_code.val);
       result->moveit_error_code = exec_code.val;
       result->success = exec_code == moveit::core::MoveItErrorCode::SUCCESS;
-      result->message = result->success ? "Motion executed successfully" : "Trajectory execution failed";
+      if (!result->success && target_reached(move_group, planning_group, joint_targets, 0.03)) {
+        RCLCPP_WARN(get_logger(), "MoveIt reported execution failure, but joints are within target tolerance");
+        result->success = true;
+        result->moveit_error_code = moveit_msgs::msg::MoveItErrorCodes::SUCCESS;
+        result->message = "Motion reached target despite execution status";
+      } else {
+        result->message = result->success ? "Motion executed successfully" : "Trajectory execution failed";
+      }
 
       publish_feedback(goal_handle, result->message, result->success ? 1.0 : 0.9);
       if (result->success) {
@@ -261,8 +344,10 @@ private:
 
   rclcpp_action::Server<SetJoints>::SharedPtr action_server_;
   std::mutex goal_mutex_;
+  std::mutex commander_mutex_;
   bool goal_active_{false};
   std::atomic_bool cancel_requested_{false};
+  std::shared_ptr<moveit::planning_interface::MoveGroupInterface> move_group_;
 
   std::string default_planning_group_;
   bool default_execute_;
@@ -278,7 +363,10 @@ int main(int argc, char** argv)
   rclcpp::init(argc, argv);
   auto node = std::make_shared<SetJointsActionServer>(
       rclcpp::NodeOptions().automatically_declare_parameters_from_overrides(true));
-  rclcpp::spin(node);
+  node->initialize();
+  rclcpp::executors::MultiThreadedExecutor executor;
+  executor.add_node(node);
+  executor.spin();
   rclcpp::shutdown();
   return 0;
 }
