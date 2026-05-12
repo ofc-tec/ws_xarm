@@ -1,5 +1,6 @@
 #include <algorithm>
-#include <chrono>
+#include <atomic>
+#include <cmath>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -55,6 +56,26 @@ public:
     cartesian_eef_step_ = get_or_declare_parameter<double>("cartesian_eef_step", 0.005);
     jump_threshold_ = get_or_declare_parameter<double>("jump_threshold", 0.0);
     action_name_ = get_or_declare_parameter<std::string>("action_name", "set_pose");
+
+  }
+
+  void initialize()
+  {
+    RCLCPP_INFO(
+        get_logger(),
+        "Creating MoveIt interface for planning group '%s'",
+        default_planning_group_.c_str());
+    move_group_ = std::make_shared<moveit::planning_interface::MoveGroupInterface>(
+        shared_from_this(), default_planning_group_);
+    if (!default_end_effector_link_.empty()) {
+      move_group_->setEndEffectorLink(default_end_effector_link_);
+    }
+    RCLCPP_INFO(
+        get_logger(),
+        "MoveIt interface ready for planning group '%s', planning frame '%s', eef '%s'",
+        default_planning_group_.c_str(),
+        move_group_->getPlanningFrame().c_str(),
+        move_group_->getEndEffectorLink().c_str());
 
     action_server_ = rclcpp_action::create_server<SetPose>(
         this,
@@ -126,6 +147,37 @@ private:
     goal_active_ = false;
   }
 
+  bool target_reached(
+      const std::shared_ptr<moveit::planning_interface::MoveGroupInterface>& move_group,
+      const std::string& end_effector_link,
+      const geometry_msgs::msg::Pose& target_pose,
+      double position_tolerance,
+      double angular_tolerance)
+  {
+    const auto current_pose_stamped = move_group->getCurrentPose(end_effector_link);
+    const auto& current_pose = current_pose_stamped.pose;
+
+    const double dx = current_pose.position.x - target_pose.position.x;
+    const double dy = current_pose.position.y - target_pose.position.y;
+    const double dz = current_pose.position.z - target_pose.position.z;
+    const double distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+    const double dot =
+        current_pose.orientation.x * target_pose.orientation.x +
+        current_pose.orientation.y * target_pose.orientation.y +
+        current_pose.orientation.z * target_pose.orientation.z +
+        current_pose.orientation.w * target_pose.orientation.w;
+    const double clamped_dot = std::clamp(std::fabs(dot), 0.0, 1.0);
+    const double angular_distance = 2.0 * std::acos(clamped_dot);
+
+    RCLCPP_INFO(
+        get_logger(),
+        "Final pose error: position %.4f m, angular %.4f rad",
+        distance,
+        angular_distance);
+    return distance <= position_tolerance && angular_distance <= angular_tolerance;
+  }
+
   void execute_goal(const std::shared_ptr<GoalHandleSetPose> goal_handle)
   {
     auto result = std::make_shared<SetPose::Result>();
@@ -138,6 +190,7 @@ private:
     const std::string end_effector_link = nonempty_or_default(goal->end_effector_link, default_end_effector_link_);
     const bool execute_motion = goal->execute;
     const bool cartesian = goal->cartesian;
+    const bool position_only = goal->position_only;
     const double velocity_scaling = bounded_or_default(
         goal->velocity_scaling, default_velocity_scaling_, 0.001, 1.0);
     const double acceleration_scaling = bounded_or_default(
@@ -146,13 +199,27 @@ private:
     const int planning_attempts = positive_or_default(goal->planning_attempts, default_planning_attempts_);
 
     try {
-      publish_feedback(goal_handle, "Creating MoveIt interface", 0.05);
-      auto move_group = std::make_shared<moveit::planning_interface::MoveGroupInterface>(
-          shared_from_this(), planning_group);
+      std::lock_guard<std::mutex> commander_lock(commander_mutex_);
+      publish_feedback(goal_handle, "Using MoveIt interface", 0.05);
+      if (planning_group != default_planning_group_) {
+        result->message = "SetPose server was initialized for a different planning group";
+        result->moveit_error_code = moveit_msgs::msg::MoveItErrorCodes::INVALID_GROUP_NAME;
+        RCLCPP_ERROR(
+            get_logger(),
+            "%s: requested '%s', available '%s'",
+            result->message.c_str(),
+            planning_group.c_str(),
+            default_planning_group_.c_str());
+        goal_handle->abort(result);
+        finish_goal();
+        return;
+      }
+      auto move_group = move_group_;
       move_group->setMaxVelocityScalingFactor(velocity_scaling);
       move_group->setMaxAccelerationScalingFactor(acceleration_scaling);
       move_group->setPlanningTime(planning_time);
       move_group->setNumPlanningAttempts(planning_attempts);
+      move_group->setStartStateToCurrentState();
       move_group->setPoseReferenceFrame(goal->target_pose.header.frame_id);
 
       if (!end_effector_link.empty()) {
@@ -186,8 +253,30 @@ private:
         plan_code = result->cartesian_fraction >= 0.9
                         ? moveit::core::MoveItErrorCode::SUCCESS
                         : moveit::core::MoveItErrorCode::PLANNING_FAILED;
+      } else if (position_only) {
+        const auto& position = goal->target_pose.pose.position;
+        RCLCPP_INFO(
+            get_logger(),
+            "Calling move_group->setPositionTarget(%.3f, %.3f, %.3f)",
+            position.x,
+            position.y,
+            position.z);
+        const bool target_ok = move_group->setPositionTarget(position.x, position.y, position.z, end_effector_link);
+        RCLCPP_INFO(get_logger(), "move_group->setPositionTarget() returned %s", target_ok ? "true" : "false");
+        if (!target_ok) {
+          result->message = "Position target rejected by MoveIt";
+          result->moveit_error_code = moveit_msgs::msg::MoveItErrorCodes::INVALID_GOAL_CONSTRAINTS;
+          goal_handle->abort(result);
+          finish_goal();
+          return;
+        }
+        RCLCPP_INFO(get_logger(), "Calling move_group->plan()");
+        plan_code = move_group->plan(plan);
+        RCLCPP_INFO(get_logger(), "move_group->plan() returned %d", plan_code.val);
       } else {
+        RCLCPP_INFO(get_logger(), "Calling move_group->setPoseTarget()");
         const bool target_ok = move_group->setPoseTarget(goal->target_pose.pose, end_effector_link);
+        RCLCPP_INFO(get_logger(), "move_group->setPoseTarget() returned %s", target_ok ? "true" : "false");
         if (!target_ok) {
           result->message = "Target pose rejected by MoveIt";
           result->moveit_error_code = moveit_msgs::msg::MoveItErrorCodes::INVALID_GOAL_CONSTRAINTS;
@@ -195,13 +284,22 @@ private:
           finish_goal();
           return;
         }
+        RCLCPP_INFO(get_logger(), "Calling move_group->plan()");
         plan_code = move_group->plan(plan);
+        RCLCPP_INFO(get_logger(), "move_group->plan() returned %d", plan_code.val);
       }
 
       result->moveit_error_code = plan_code.val;
       if (plan_code != moveit::core::MoveItErrorCode::SUCCESS) {
         result->message = cartesian ? "Cartesian planning failed" : "Pose planning failed";
         goal_handle->abort(result);
+        finish_goal();
+        return;
+      }
+
+      if (goal_handle->is_canceling() || cancel_requested_.load()) {
+        result->message = "Canceled after planning";
+        goal_handle->canceled(result);
         finish_goal();
         return;
       }
@@ -223,10 +321,29 @@ private:
       }
 
       publish_feedback(goal_handle, "Executing trajectory", 0.75);
-      const auto exec_code = cartesian ? move_group->execute(cartesian_trajectory) : move_group->execute(plan);
+      moveit::core::MoveItErrorCode exec_code;
+      if (cartesian) {
+        exec_code = move_group->execute(cartesian_trajectory);
+      } else {
+        RCLCPP_INFO(get_logger(), "Calling move_group->move()");
+        exec_code = move_group->move();
+        RCLCPP_INFO(get_logger(), "move_group->move() returned %d", exec_code.val);
+      }
       result->moveit_error_code = exec_code.val;
       result->success = exec_code == moveit::core::MoveItErrorCode::SUCCESS;
-      result->message = result->success ? "Motion executed successfully" : "Trajectory execution failed";
+      if (!result->success && target_reached(
+          move_group,
+          end_effector_link,
+          goal->target_pose.pose,
+          0.03,
+          position_only ? 3.15 : 0.35)) {
+        RCLCPP_WARN(get_logger(), "MoveIt reported execution failure, but end effector is within target tolerance");
+        result->success = true;
+        result->moveit_error_code = moveit_msgs::msg::MoveItErrorCodes::SUCCESS;
+        result->message = "Motion reached target despite execution status";
+      } else {
+        result->message = result->success ? "Motion executed successfully" : "Trajectory execution failed";
+      }
 
       publish_feedback(goal_handle, result->message, result->success ? 1.0 : 0.9);
       if (result->success) {
@@ -245,8 +362,10 @@ private:
 
   rclcpp_action::Server<SetPose>::SharedPtr action_server_;
   std::mutex goal_mutex_;
+  std::mutex commander_mutex_;
   bool goal_active_{false};
   std::atomic_bool cancel_requested_{false};
+  std::shared_ptr<moveit::planning_interface::MoveGroupInterface> move_group_;
 
   std::string default_planning_group_;
   std::string default_end_effector_link_;
@@ -264,9 +383,9 @@ private:
 int main(int argc, char** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::NodeOptions options;
-  options.automatically_declare_parameters_from_overrides(true);
-  auto node = std::make_shared<SetPoseActionServer>(options);
+  auto node = std::make_shared<SetPoseActionServer>(
+      rclcpp::NodeOptions().automatically_declare_parameters_from_overrides(true));
+  node->initialize();
 
   rclcpp::executors::MultiThreadedExecutor executor;
   executor.add_node(node);

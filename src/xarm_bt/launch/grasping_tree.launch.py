@@ -1,5 +1,6 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction, TimerAction
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, OpaqueFunction, TimerAction
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from uf_ros_lib.moveit_configs_builder import MoveItConfigsBuilder
@@ -26,6 +27,10 @@ def launch_setup(context, *args, **kwargs):
     yolo_depth_topic = LaunchConfiguration("yolo_depth_topic", default="/camera/depth/image")
     yolo_depth_info_topic = LaunchConfiguration("yolo_depth_info_topic", default="/camera/depth/camera_info")
     yolo_model_path = LaunchConfiguration("yolo_model_path", default="yolo11n-seg.pt")
+    run_tree = LaunchConfiguration("run_tree", default="true")
+    start_delay_sec = LaunchConfiguration("start_delay_sec", default="20.0")
+    use_introspection = LaunchConfiguration("use_introspection", default="false")
+    with_viewer = LaunchConfiguration("with_viewer", default="false")
 
     moveit_config = MoveItConfigsBuilder(
         context=context,
@@ -209,6 +214,44 @@ def launch_setup(context, *args, **kwargs):
                         },
                     ],
                 ),
+                Node(
+                    package="xarm_pose_action",
+                    executable="set_pose_action_server",
+                    name="set_pose_action_server",
+                    output="screen",
+                    parameters=[
+                        move_group_interface_params,
+                        {
+                            "planning_group": "xarm6",
+                            "end_effector_link": "link_eef",
+                            "action_name": "set_pose",
+                            "execute": True,
+                            "cartesian": False,
+                            "velocity_scaling": 0.3,
+                            "acceleration_scaling": 0.1,
+                            "planning_time": 25.0,
+                            "planning_attempts": 10,
+                            "use_sim_time": use_sim_time,
+                        },
+                    ],
+                ),
+                Node(
+                    condition=IfCondition(run_tree),
+                    package="xarm_bt",
+                    executable="grasping_tree",
+                    name="xarm_bt_grasping_tree",
+                    output="screen",
+                    parameters=[
+                        {"use_sim_time": use_sim_time},
+                        {"start_delay_sec": start_delay_sec},
+                        {"use_introspection": use_introspection},
+                    ],
+                ),
+                ExecuteProcess(
+                    condition=IfCondition(with_viewer),
+                    cmd=["py-trees-tree-viewer"],
+                    output="screen",
+                ),
             ],
         ),
     ]
@@ -229,5 +272,9 @@ def generate_launch_description():
         DeclareLaunchArgument("yolo_depth_topic", default_value="/camera/depth/image"),
         DeclareLaunchArgument("yolo_depth_info_topic", default_value="/camera/depth/camera_info"),
         DeclareLaunchArgument("yolo_model_path", default_value="yolo11n-seg.pt"),
+        DeclareLaunchArgument("run_tree", default_value="true"),
+        DeclareLaunchArgument("start_delay_sec", default_value="20.0"),
+        DeclareLaunchArgument("use_introspection", default_value="false"),
+        DeclareLaunchArgument("with_viewer", default_value="false"),
         OpaqueFunction(function=launch_setup),
     ])

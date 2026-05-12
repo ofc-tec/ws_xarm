@@ -1,0 +1,4 @@
+# Python-side helpers used by the behavior-tree workspace.
+# ROS packages are still installed with apt/rosdep.
+py_trees
+PyYAML

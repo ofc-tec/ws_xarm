@@ -1,9 +1,10 @@
 import re
+from copy import deepcopy
 
 import py_trees
 from geometry_msgs.msg import TransformStamped
 from py_trees.common import Access
-from tf2_ros import TransformBroadcaster
+from tf2_ros import StaticTransformBroadcaster
 
 
 class SelectYoloTarget(py_trees.behaviour.Behaviour):
@@ -35,7 +36,7 @@ class SelectYoloTarget(py_trees.behaviour.Behaviour):
         self.broadcaster = None
 
     def setup(self, **kwargs):
-        self.broadcaster = TransformBroadcaster(self.node)
+        self.broadcaster = StaticTransformBroadcaster(self.node)
 
     def update(self):
         classes = list(getattr(self.bb, self.classes_key, []) or [])
@@ -52,10 +53,12 @@ class SelectYoloTarget(py_trees.behaviour.Behaviour):
         setattr(self.bb, self.target_pose_key, corrected_pose)
         self._publish_debug_tf(corrected_pose, selected_class, selected_index)
 
+        sp = source_pose.pose.position
         p = corrected_pose.pose.position
         self.node.get_logger().info(
             f"[SelectYoloTarget] {selected_class} -> "
-            f"{corrected_pose.header.frame_id}: ({p.x:.3f}, {p.y:.3f}, {p.z:.3f})"
+            f"raw {source_pose.header.frame_id}: ({sp.x:.3f}, {sp.y:.3f}, {sp.z:.3f}), "
+            f"corrected {corrected_pose.header.frame_id}: ({p.x:.3f}, {p.y:.3f}, {p.z:.3f})"
         )
         return py_trees.common.Status.SUCCESS
 
@@ -68,7 +71,7 @@ class SelectYoloTarget(py_trees.behaviour.Behaviour):
         return None
 
     def _correct_pose(self, source_pose):
-        corrected_pose = source_pose
+        corrected_pose = deepcopy(source_pose)
 
         # YOLO back-projection uses optical camera coordinates:
         #   x right, y down, z forward.

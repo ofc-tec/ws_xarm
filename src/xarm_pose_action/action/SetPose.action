@@ -4,6 +4,7 @@ string planning_group
 string end_effector_link
 bool execute
 bool cartesian
+bool position_only
 float64 velocity_scaling
 float64 acceleration_scaling
 float64 planning_time

@@ -18,6 +18,7 @@
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>tf2_geometry_msgs</exec_depend>
   <exec_depend>pc_tools</exec_depend>
   <exec_depend>uf_ros_lib</exec_depend>
 

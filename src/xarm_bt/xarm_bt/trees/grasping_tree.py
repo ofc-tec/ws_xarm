@@ -3,8 +3,11 @@ import math
 import py_trees
 
 from xarm_bt.behaviors.say_text import SayText
+from xarm_bt.behaviors.offset_pose import OffsetPose
 from xarm_bt.behaviors.select_yolo_target import SelectYoloTarget
 from xarm_bt.behaviors.set_joint_values import SetJointValues
+from xarm_bt.behaviors.set_pose import SetPose
+from xarm_bt.behaviors.transform_pose import TransformPose
 from xarm_bt.behaviors.yolo_detect import YoloDetect
 
 
@@ -29,10 +32,17 @@ def create_behavior_tree(node):
             execute=True,
         )
     )
+    root.add_child(
+        SayText(
+            name="SayScanningTable",
+            node=node,
+            text="Scanning table for apple",
+        )
+    )
     root.add_child(YoloDetect(name="DetectObjects", node=node))
 
-    apple_found = py_trees.composites.Sequence(name="AppleFound", memory=True)
-    apple_found.add_child(
+    select_apple = py_trees.composites.Sequence(name="FindApple", memory=True)
+    select_apple.add_child(
         SelectYoloTarget(
             name="SelectAppleTarget",
             node=node,
@@ -48,12 +58,66 @@ def create_behavior_tree(node):
             text="I did not find an apple",
         )
     )
+    no_apple.add_child(py_trees.behaviours.Failure(name="NoAppleStopsTree"))
 
-    root.add_child(
+    apple_found = py_trees.composites.Sequence(name="AppleFound", memory=True)
+    apple_found.add_child(
         py_trees.composites.Selector(
-            name="HandleAppleDetection",
+            name="HandleAppleSelection",
             memory=False,
-            children=[apple_found, no_apple],
+            children=[select_apple, no_apple],
         )
     )
+    apple_found.add_child(
+        SayText(
+            name="SayAppleFound",
+            node=node,
+            text="Apple found. Grasping.",
+        )
+    )
+    apple_found.add_child(
+        TransformPose(
+            name="TransformAppleTargetToBase",
+            node=node,
+            input_key="selected_yolo_pose",
+            output_key="selected_yolo_pose_link_base",
+            target_frame="link_base",
+            debug_child_frame_id="bt_selected_apple_link_base",
+        )
+    )
+    apple_found.add_child(
+        OffsetPose(
+            name="MakeAppleApproachPose",
+            node=node,
+            input_key="selected_yolo_pose_link_base",
+            output_key="apple_approach_pose",
+            offset_z=0.15,
+            orientation_xyzw=[1.0, 0.0, 0.0, 0.0],
+            debug_child_frame_id="bt_apple_approach_pose",
+        )
+    )
+    apple_found.add_child(
+        SetPose(
+            name="MoveAboveApple",
+            node=node,
+            pose_key="apple_approach_pose",
+            group_name="xarm6",
+            pose_link="link_eef",
+            execute=True,
+            position_only=True,
+            velocity_scaling=0.9,
+            acceleration_scaling=0.9,
+            planning_time=25.0,
+            planning_attempts=10,
+            max_retries=3,
+        )
+    )
+    apple_found.add_child(
+        SayText(
+            name="SayAppleReached",
+            node=node,
+            text="Success. Thanks for watching.",
+        )
+    )
+    root.add_child(apple_found)
     return py_trees.trees.BehaviourTree(root)

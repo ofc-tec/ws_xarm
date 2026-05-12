@@ -17,7 +17,6 @@ setup(
             "share/" + package_name + "/launch",
             [
                 "launch/grasping_tree.launch.py",
-                "launch/grasping_tree_runner.launch.py",
                 "launch/set_pose_example.launch.py",
             ],
         ),
