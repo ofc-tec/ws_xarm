@@ -23,6 +23,8 @@ class SetPose(py_trees.behaviour.Behaviour):
         action_name: str = "/set_pose",
         velocity_scaling: float = 0.3,
         acceleration_scaling: float = 0.1,
+        position_tolerance: float = 0.01,
+        orientation_tolerance: float = 0.05,
         planning_time: float = 5.0,
         planning_attempts: int = 5,
         max_retries: int = 0,
@@ -39,6 +41,8 @@ class SetPose(py_trees.behaviour.Behaviour):
         self.action_name = action_name
         self.velocity_scaling = velocity_scaling
         self.acceleration_scaling = acceleration_scaling
+        self.position_tolerance = position_tolerance
+        self.orientation_tolerance = orientation_tolerance
         self.planning_time = planning_time
         self.planning_attempts = planning_attempts
         self.max_retries = max(0, int(max_retries))
@@ -92,6 +96,8 @@ class SetPose(py_trees.behaviour.Behaviour):
         goal.position_only = self.position_only
         goal.velocity_scaling = float(self.velocity_scaling)
         goal.acceleration_scaling = float(self.acceleration_scaling)
+        goal.position_tolerance = float(self.position_tolerance)
+        goal.orientation_tolerance = float(self.orientation_tolerance)
         goal.planning_time = float(self.planning_time)
         goal.planning_attempts = int(self.planning_attempts)
 

@@ -229,6 +229,8 @@ def launch_setup(context, *args, **kwargs):
                             "cartesian": False,
                             "velocity_scaling": 0.3,
                             "acceleration_scaling": 0.1,
+                            "position_tolerance": 0.01,
+                            "orientation_tolerance": 0.05,
                             "planning_time": 25.0,
                             "planning_attempts": 10,
                             "use_sim_time": use_sim_time,

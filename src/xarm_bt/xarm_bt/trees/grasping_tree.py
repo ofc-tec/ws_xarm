@@ -1,6 +1,7 @@
 import math
 
 import py_trees
+from tf_transformations import quaternion_from_euler
 
 from xarm_bt.behaviors.say_text import SayText
 from xarm_bt.behaviors.offset_pose import OffsetPose
@@ -19,6 +20,13 @@ CAPTURE_IMAGE_JOINTS = [   # obtained from moveit gui
     math.radians(112.0),
     math.radians(0.0),
 ]
+
+ABOVE_GRASP_RPY_DEG = [-180.0, 0.0, 180.0]
+ABOVE_GRASP_ORIENTATION = list(quaternion_from_euler(
+    math.radians(ABOVE_GRASP_RPY_DEG[0]),
+    math.radians(ABOVE_GRASP_RPY_DEG[1]),
+    math.radians(ABOVE_GRASP_RPY_DEG[2]),
+))
 
 
 def create_behavior_tree(node):
@@ -91,8 +99,8 @@ def create_behavior_tree(node):
             node=node,
             input_key="selected_yolo_pose_link_base",
             output_key="apple_approach_pose",
-            offset_z=0.15,
-            orientation_xyzw=[1.0, 0.0, 0.0, 0.0],
+            offset_z=0.35,
+            orientation_xyzw=ABOVE_GRASP_ORIENTATION,
             debug_child_frame_id="bt_apple_approach_pose",
         )
     )
@@ -104,9 +112,11 @@ def create_behavior_tree(node):
             group_name="xarm6",
             pose_link="link_eef",
             execute=True,
-            position_only=True,
+            position_only=False,
             velocity_scaling=0.9,
             acceleration_scaling=0.9,
+            position_tolerance=0.03,
+            orientation_tolerance=0.35,
             planning_time=25.0,
             planning_attempts=10,
             max_retries=3,

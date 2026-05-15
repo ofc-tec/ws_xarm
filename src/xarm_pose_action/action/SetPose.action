@@ -7,6 +7,8 @@ bool cartesian
 bool position_only
 float64 velocity_scaling
 float64 acceleration_scaling
+float64 position_tolerance
+float64 orientation_tolerance
 float64 planning_time
 int32 planning_attempts
 

@@ -51,6 +51,8 @@ public:
     default_cartesian_ = get_or_declare_parameter<bool>("cartesian", false);
     default_velocity_scaling_ = get_or_declare_parameter<double>("velocity_scaling", 0.3);
     default_acceleration_scaling_ = get_or_declare_parameter<double>("acceleration_scaling", 0.1);
+    default_position_tolerance_ = get_or_declare_parameter<double>("position_tolerance", 0.01);
+    default_orientation_tolerance_ = get_or_declare_parameter<double>("orientation_tolerance", 0.05);
     default_planning_time_ = get_or_declare_parameter<double>("planning_time", 5.0);
     default_planning_attempts_ = get_or_declare_parameter<int>("planning_attempts", 5);
     cartesian_eef_step_ = get_or_declare_parameter<double>("cartesian_eef_step", 0.005);
@@ -195,6 +197,10 @@ private:
         goal->velocity_scaling, default_velocity_scaling_, 0.001, 1.0);
     const double acceleration_scaling = bounded_or_default(
         goal->acceleration_scaling, default_acceleration_scaling_, 0.001, 1.0);
+    const double position_tolerance = bounded_or_default(
+        goal->position_tolerance, default_position_tolerance_, 0.0001, 1.0);
+    const double orientation_tolerance = bounded_or_default(
+        goal->orientation_tolerance, default_orientation_tolerance_, 0.0001, 3.14159);
     const double planning_time = bounded_or_default(goal->planning_time, default_planning_time_, 0.1, 120.0);
     const int planning_attempts = positive_or_default(goal->planning_attempts, default_planning_attempts_);
 
@@ -221,6 +227,8 @@ private:
       move_group->setNumPlanningAttempts(planning_attempts);
       move_group->setStartStateToCurrentState();
       move_group->setPoseReferenceFrame(goal->target_pose.header.frame_id);
+      move_group->setGoalPositionTolerance(position_tolerance);
+      move_group->setGoalOrientationTolerance(orientation_tolerance);
 
       if (!end_effector_link.empty()) {
         move_group->setEndEffectorLink(end_effector_link);
@@ -232,6 +240,11 @@ private:
           planning_group.c_str(),
           move_group->getPlanningFrame().c_str(),
           move_group->getEndEffectorLink().c_str());
+      RCLCPP_INFO(
+          get_logger(),
+          "Goal tolerances: position %.4f m, orientation %.4f rad",
+          position_tolerance,
+          orientation_tolerance);
 
       if (goal_handle->is_canceling() || cancel_requested_.load()) {
         result->message = "Canceled before planning";
@@ -335,8 +348,8 @@ private:
           move_group,
           end_effector_link,
           goal->target_pose.pose,
-          0.03,
-          position_only ? 3.15 : 0.35)) {
+          position_tolerance,
+          position_only ? 3.15 : orientation_tolerance)) {
         RCLCPP_WARN(get_logger(), "MoveIt reported execution failure, but end effector is within target tolerance");
         result->success = true;
         result->moveit_error_code = moveit_msgs::msg::MoveItErrorCodes::SUCCESS;
@@ -373,6 +386,8 @@ private:
   bool default_cartesian_;
   double default_velocity_scaling_;
   double default_acceleration_scaling_;
+  double default_position_tolerance_;
+  double default_orientation_tolerance_;
   double default_planning_time_;
   int default_planning_attempts_;
   double cartesian_eef_step_;

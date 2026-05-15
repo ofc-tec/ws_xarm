@@ -58,9 +58,11 @@ class OffsetPose(py_trees.behaviour.Behaviour):
         self._publish_debug_tf(target_pose)
 
         p = target_pose.pose.position
+        q = target_pose.pose.orientation
         self.node.get_logger().info(
             f"[OffsetPose] {self.output_key} = {target_pose.header.frame_id} "
-            f"({p.x:.3f}, {p.y:.3f}, {p.z:.3f})"
+            f"({p.x:.3f}, {p.y:.3f}, {p.z:.3f}), "
+            f"q=({q.x:.3f}, {q.y:.3f}, {q.z:.3f}, {q.w:.3f})"
         )
         return py_trees.common.Status.SUCCESS
 
