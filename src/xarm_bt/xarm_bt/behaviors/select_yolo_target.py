@@ -15,6 +15,7 @@ class SelectYoloTarget(py_trees.behaviour.Behaviour):
         name: str,
         node,
         target_class: str = "apple",
+        target_aliases=None,
         classes_key: str = "yolo_class_names",
         poses_key: str = "yolo_poses",
         target_pose_key: str = "selected_yolo_pose",
@@ -23,6 +24,7 @@ class SelectYoloTarget(py_trees.behaviour.Behaviour):
         super().__init__(name)
         self.node = node
         self.target_class = target_class
+        self.target_aliases = list(target_aliases or [])
         self.classes_key = classes_key
         self.poses_key = poses_key
         self.target_pose_key = target_pose_key
@@ -44,7 +46,9 @@ class SelectYoloTarget(py_trees.behaviour.Behaviour):
 
         selected_index = self._find_target_index(classes, poses)
         if selected_index is None:
-            self.node.get_logger().warn(f"[SelectYoloTarget] No {self.target_class} with valid 3D pose")
+            self.node.get_logger().warn(
+                f"[SelectYoloTarget] No {self._target_description()} with valid 3D pose"
+            )
             return py_trees.common.Status.FAILURE
 
         selected_class = classes[selected_index]
@@ -63,12 +67,23 @@ class SelectYoloTarget(py_trees.behaviour.Behaviour):
         return py_trees.common.Status.SUCCESS
 
     def _find_target_index(self, classes, poses):
+        target_names = [self.target_class, *self.target_aliases]
         for i, class_name in enumerate(classes[: len(poses)]):
-            if self.target_class.lower() not in class_name.lower():
+            class_name_key = self._class_key(class_name)
+            if not any(self._class_key(target_name) in class_name_key for target_name in target_names):
                 continue
             if poses[i].header.frame_id:
                 return i
         return None
+
+    def _class_key(self, class_name):
+        return re.sub(r"[^a-z0-9]+", "", class_name.lower())
+
+    def _target_description(self):
+        if not self.target_aliases:
+            return self.target_class
+        aliases = ", ".join(self.target_aliases)
+        return f"{self.target_class} or aliases [{aliases}]"
 
     def _correct_pose(self, source_pose):
         corrected_pose = deepcopy(source_pose)

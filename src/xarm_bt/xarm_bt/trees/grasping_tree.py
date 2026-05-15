@@ -55,6 +55,7 @@ def create_behavior_tree(node):
             name="SelectAppleTarget",
             node=node,
             target_class="apple",
+            target_aliases=["sports_ball", "frisbee"],
         )
     )
 
