@@ -1,9 +1,15 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <sstream>
+
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include <pcl/filters/filter.h>
 #include <pcl/filters/voxel_grid.h>
 
 class PCRepubSanitized : public rclcpp::Node
@@ -44,8 +50,33 @@ private:
 
     pcl::fromROSMsg(*msg, *cloud);
 
+    size_t finite_count = 0;
+    float min_x = std::numeric_limits<float>::infinity();
+    float min_y = std::numeric_limits<float>::infinity();
+    float min_z = std::numeric_limits<float>::infinity();
+    float max_x = -std::numeric_limits<float>::infinity();
+    float max_y = -std::numeric_limits<float>::infinity();
+    float max_z = -std::numeric_limits<float>::infinity();
+    for (const auto & p : cloud->points) {
+      if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) {
+        continue;
+      }
+      finite_count++;
+      min_x = std::min(min_x, p.x);
+      min_y = std::min(min_y, p.y);
+      min_z = std::min(min_z, p.z);
+      max_x = std::max(max_x, p.x);
+      max_y = std::max(max_y, p.y);
+      max_z = std::max(max_z, p.z);
+    }
+
+    pcl::PointCloud<pcl::PointXYZ>::Ptr clean(new pcl::PointCloud<pcl::PointXYZ>());
+    std::vector<int> valid_indices;
+    cloud->is_dense = false;
+    pcl::removeNaNFromPointCloud(*cloud, *clean, valid_indices);
+
     pcl::VoxelGrid<pcl::PointXYZ> voxel;
-    voxel.setInputCloud(cloud);
+    voxel.setInputCloud(clean);
     voxel.setLeafSize(leaf_size, leaf_size, leaf_size);
     voxel.filter(*filtered);
 
@@ -57,15 +88,40 @@ private:
 
     pub_->publish(out);
 
+    std::ostringstream fields;
+    for (size_t i = 0; i < msg->fields.size(); ++i) {
+      if (i > 0) {
+        fields << ",";
+      }
+      fields << msg->fields[i].name << "@" << msg->fields[i].offset;
+    }
+
     // RCLCPP_INFO_THROTTLE(
     //   this->get_logger(),
     //   *this->get_clock(),
     //   1000,
-    //   "published filtered cloud: in=%zu out=%zu leaf=%.3f",
+    //   "pc debug frame=%s raw=%ux%u fields=[%s] point_step=%u row_step=%u "
+    //   "pcl=%zu finite=%zu clean=%zu filtered=%zu out=%ux%u leaf=%.3f "
+    //   "xyz_min=(%.3f,%.3f,%.3f) xyz_max=(%.3f,%.3f,%.3f)",
+    //   msg->header.frame_id.c_str(),
+    //   msg->width,
+    //   msg->height,
+    //   fields.str().c_str(),
+    //   msg->point_step,
+    //   msg->row_step,
     //   cloud->size(),
+    //   finite_count,
+    //   clean->size(),
     //   filtered->size(),
-    //   leaf_size
-    // );
+    //   out.width,
+    //   out.height,
+    //   leaf_size,
+    //   finite_count ? min_x : 0.0f,
+    //   finite_count ? min_y : 0.0f,
+    //   finite_count ? min_z : 0.0f,
+    //   finite_count ? max_x : 0.0f,
+    //   finite_count ? max_y : 0.0f,
+    //   finite_count ? max_z : 0.0f);
   }
 
   int count_ = 0;
